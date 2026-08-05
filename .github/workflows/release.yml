@@ -61,6 +61,10 @@ jobs:
           $releaseAssets = Join-Path $PWD 'build\release-assets'
           New-Item -ItemType Directory -Path $releaseAssets -Force | Out-Null
           $newExe = Resolve-Path '.\dist\RTS Converter.exe'
+          $githubExe = Join-Path $releaseAssets 'RTS.Converter.exe'
+          Copy-Item -LiteralPath $newExe -Destination $githubExe -Force
+          $githubHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $githubExe).Hash.ToLowerInvariant()
+          "$githubHash  RTS.Converter.exe" | Set-Content -LiteralPath "$githubExe.sha256" -Encoding ascii
           $legacyExe = Join-Path $releaseAssets 'RTZ-to-CSV.exe'
           Copy-Item -LiteralPath $newExe -Destination $legacyExe -Force
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $legacyExe).Hash.ToLowerInvariant()
@@ -71,8 +75,8 @@ jobs:
         shell: pwsh
         run: |
           gh release create $env:GITHUB_REF_NAME `
-            '.\dist\RTS Converter.exe' `
-            '.\dist\RTS Converter.exe.sha256' `
+            '.\build\release-assets\RTS.Converter.exe' `
+            '.\build\release-assets\RTS.Converter.exe.sha256' `
             '.\build\release-assets\RTZ-to-CSV.exe' `
             '.\build\release-assets\RTZ-to-CSV.exe.sha256' `
             --verify-tag --generate-notes --latest

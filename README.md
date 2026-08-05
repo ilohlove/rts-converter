@@ -37,7 +37,7 @@ Schedules, open attributes, and vendor extensions are not flattened. An `ActiveP
 
 The public source repository is [github.com/ilohlove/rts-converter](https://github.com/ilohlove/rts-converter). Releases use strict `vMAJOR.MINOR.PATCH` tags and stable, immutable GitHub Releases only. The app checks the latest release at every opening and from **Cập nhật / Update**. It shows release notes and asks before downloading.
 
-The updater downloads `RTS Converter.exe` and its `RTS Converter.exe.sha256` manifest over HTTPS, verifies the GitHub asset digest and SHA-256, then stages the file and restarts the application. Releases also carry `RTZ-to-CSV.exe` compatibility assets so version 1.0.0 can migrate atomically to the new filename. If the installed directory is not writable, the app opens the Release page instead. No telemetry is collected.
+The updater downloads the `RTS Converter.exe` build (GitHub displays uploaded asset names with spaces as `RTS.Converter.exe`) and its checksum manifest over HTTPS, verifies the GitHub asset digest and SHA-256, then stages the file and restarts the application. Releases also carry `RTZ-to-CSV.exe` compatibility assets so version 1.0.0 can migrate atomically to the new filename. If the installed directory is not writable, the app opens the Release page instead. No telemetry is collected.
 
 The executable is unsigned, so Windows SmartScreen may show a warning. The updater uses SHA-256 integrity checks but does not replace Windows code signing. Releases are published by GitHub Actions after a version tag; immutable releases must be enabled once for the repository:
 

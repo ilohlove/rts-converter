@@ -11,6 +11,7 @@ from app_metadata import (
     APP_VERSION,
     CHECKSUM_ASSET_NAME,
     EXECUTABLE_NAME,
+    GITHUB_ASSET_EXECUTABLE_NAME,
     GITHUB_REPOSITORY,
     LEGACY_CHECKSUM_ASSET_NAME,
     LEGACY_EXECUTABLE_NAME,
@@ -101,6 +102,7 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual("1.1.0", APP_VERSION)
         self.assertEqual("rts-converter", GITHUB_REPOSITORY)
         self.assertEqual("RTS Converter.exe", EXECUTABLE_NAME)
+        self.assertEqual("RTS.Converter.exe", GITHUB_ASSET_EXECUTABLE_NAME)
         self.assertEqual("RTS Converter.exe.sha256", CHECKSUM_ASSET_NAME)
         self.assertEqual("RTZ-to-CSV.exe", LEGACY_EXECUTABLE_NAME)
         self.assertEqual("RTZ-to-CSV.exe.sha256", LEGACY_CHECKSUM_ASSET_NAME)
@@ -150,6 +152,16 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertIsNotNone(release)
         self.assertEqual(LEGACY_EXECUTABLE_NAME, release.executable_name)
 
+    def test_accepts_github_normalized_current_asset_pair(self):
+        payload = release_payload(
+            executable_names=(GITHUB_ASSET_EXECUTABLE_NAME,),
+            checksum_names=(f"{GITHUB_ASSET_EXECUTABLE_NAME}.sha256",),
+        )
+        with mock.patch("updater._request_json", return_value=payload):
+            release = check_for_update("1.1.0")
+        self.assertIsNotNone(release)
+        self.assertEqual(GITHUB_ASSET_EXECUTABLE_NAME, release.executable_name)
+
     def test_equal_or_older_release_is_ignored(self):
         for tag in ("v1.1.0", "v1.0.0"):
             with self.subTest(tag=tag):
@@ -188,6 +200,20 @@ class DownloadTests(unittest.TestCase):
             _parse_checksum_manifest(
                 f"{digest} *{LEGACY_EXECUTABLE_NAME}\n".encode("ascii"),
                 executable_name=LEGACY_EXECUTABLE_NAME,
+            ),
+        )
+        self.assertEqual(
+            digest,
+            _parse_checksum_manifest(
+                f"{digest}  {EXECUTABLE_NAME}\n".encode("ascii"),
+                executable_name=GITHUB_ASSET_EXECUTABLE_NAME,
+            ),
+        )
+        self.assertEqual(
+            digest,
+            _parse_checksum_manifest(
+                f"{digest}  {GITHUB_ASSET_EXECUTABLE_NAME}\n".encode("ascii"),
+                executable_name=GITHUB_ASSET_EXECUTABLE_NAME,
             ),
         )
         with self.assertRaises(UpdateError):

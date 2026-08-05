@@ -24,6 +24,7 @@ from app_metadata import (
     APP_VERSION,
     EXECUTABLE_NAME,
     GITHUB_API_VERSION,
+    GITHUB_ASSET_EXECUTABLE_NAME,
     LEGACY_EXECUTABLE_NAME,
     LATEST_RELEASE_API,
     RELEASE_EXECUTABLE_NAMES,
@@ -441,11 +442,19 @@ def _parse_checksum_manifest(
         text = data.decode("ascii")
     except UnicodeDecodeError as exc:
         raise UpdateError("Checksum không phải ASCII / Checksum is not ASCII.") from exc
+    accepted_names = {executable_name}
+    if executable_name in {EXECUTABLE_NAME, GITHUB_ASSET_EXECUTABLE_NAME}:
+        accepted_names.update(
+            {
+                EXECUTABLE_NAME,
+                GITHUB_ASSET_EXECUTABLE_NAME,
+            }
+        )
     for line in text.splitlines():
         match = re.fullmatch(r"([0-9a-fA-F]{64}) (?: |\*)(.+)", line)
         if (
             match
-            and match.group(2) == executable_name
+            and match.group(2) in accepted_names
         ):
             digest = match.group(1).lower()
             if _SHA256_PATTERN.fullmatch(digest):

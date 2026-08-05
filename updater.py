@@ -22,13 +22,13 @@ from urllib.request import Request, urlopen
 from app_metadata import (
     APP_NAME,
     APP_VERSION,
-    CHECKSUM_ASSET_NAME,
     EXECUTABLE_NAME,
     GITHUB_API_VERSION,
-    GITHUB_OWNER,
-    GITHUB_REPOSITORY,
+    LEGACY_EXECUTABLE_NAME,
     LATEST_RELEASE_API,
+    RELEASE_EXECUTABLE_NAMES,
     RELEASES_URL,
+    UPDATE_CACHE_DIRECTORY_NAME,
 )
 
 
@@ -60,6 +60,7 @@ class ReleaseInfo:
     executable_asset_url: str
     checksum_asset_url: str
     api_digest: str
+    executable_name: str = EXECUTABLE_NAME
 
     @property
     def version_text(self) -> str:
@@ -115,27 +116,42 @@ def check_for_update(
     assets = payload.get("assets")
     if not isinstance(assets, list):
         raise UpdateError("Release thiếu assets / Release assets are missing.")
+    supported_asset_names = {
+        name
+        for executable_name in RELEASE_EXECUTABLE_NAMES
+        for name in (executable_name, f"{executable_name}.sha256")
+    }
     matching: dict[str, dict] = {}
     for asset in assets:
         if not isinstance(asset, dict):
             continue
         name = asset.get("name")
-        if name in {EXECUTABLE_NAME, CHECKSUM_ASSET_NAME}:
+        if name in supported_asset_names:
             if name in matching:
                 raise UpdateError(f"Asset bị trùng / Duplicate asset: {name}.")
             if asset.get("state") != "uploaded":
                 raise UpdateError(f"Asset chưa upload xong / Asset is not uploaded: {name}.")
             matching[name] = asset
 
-    if set(matching) != {EXECUTABLE_NAME, CHECKSUM_ASSET_NAME}:
+    executable_name = next(
+        (
+            name
+            for name in RELEASE_EXECUTABLE_NAMES
+            if name in matching and f"{name}.sha256" in matching
+        ),
+        None,
+    )
+    if executable_name is None:
         raise UpdateError(
-            f"Release phải có đúng {EXECUTABLE_NAME} và {CHECKSUM_ASSET_NAME} / "
-            "Release must contain the required executable and checksum assets."
+            f"Release phải có một cặp EXE/checksum được hỗ trợ / "
+            f"Release must contain a supported executable/checksum pair: "
+            f"{', '.join(RELEASE_EXECUTABLE_NAMES)}."
         )
 
-    executable_url = _asset_api_url(matching[EXECUTABLE_NAME], EXECUTABLE_NAME)
-    checksum_url = _asset_api_url(matching[CHECKSUM_ASSET_NAME], CHECKSUM_ASSET_NAME)
-    api_digest = _normalise_digest(matching[EXECUTABLE_NAME].get("digest"))
+    checksum_name = f"{executable_name}.sha256"
+    executable_url = _asset_api_url(matching[executable_name], executable_name)
+    checksum_url = _asset_api_url(matching[checksum_name], checksum_name)
+    api_digest = _normalise_digest(matching[executable_name].get("digest"))
     html_url = payload.get("html_url")
     if not isinstance(html_url, str) or not html_url.startswith("https://"):
         html_url = RELEASES_URL
@@ -150,6 +166,7 @@ def check_for_update(
         executable_asset_url=executable_url,
         checksum_asset_url=checksum_url,
         api_digest=api_digest,
+        executable_name=executable_name,
     )
 
 
@@ -166,7 +183,10 @@ def download_update(
         max_bytes=MAX_CHECKSUM_BYTES,
         accept="application/octet-stream",
     )
-    manifest_digest = _parse_checksum_manifest(checksum_bytes)
+    manifest_digest = _parse_checksum_manifest(
+        checksum_bytes,
+        executable_name=release.executable_name,
+    )
     if manifest_digest != release.api_digest:
         raise UpdateError(
             "Checksum manifest không khớp digest GitHub / "
@@ -179,7 +199,7 @@ def download_update(
         stage_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise UpdateError(
-            f"KhÃ´ng thá»ƒ táº¡o thÆ° má»¥c stage / Could not create update staging directory: {exc}"
+            f"Không thể tạo thư mục stage / Could not create update staging directory: {exc}"
         ) from exc
     part_path = stage_dir / f".{EXECUTABLE_NAME}.part"
     staged_path = stage_dir / EXECUTABLE_NAME
@@ -293,23 +313,49 @@ def open_release_page() -> None:
 
 def _apply_update(target: Path, pid: int, expected_digest: str) -> None:
     staged = Path(sys.executable).resolve()
-    if staged == target:
-        raise UpdateError("Bản stage trùng EXE hiện tại / Staged EXE equals current EXE.")
+    is_legacy_target = target.name.casefold() == LEGACY_EXECUTABLE_NAME.casefold()
+    destination = target.with_name(EXECUTABLE_NAME) if is_legacy_target else target
+    if staged == target or staged == destination:
+        raise UpdateError(
+            "Bản stage trùng EXE đích / Staged EXE equals the install target."
+        )
     if _sha256_file(staged) != expected_digest:
         raise UpdateError("SHA-256 bản stage không khớp / Staged EXE SHA-256 does not match.")
     if not _wait_for_process(pid, UPDATE_WAIT_SECONDS):
         raise UpdateError("EXE cũ chưa thoát / The old EXE did not exit in time.")
 
-    candidate = target.with_name(target.name + ".new")
+    destination_matches = False
+    if destination != target and destination.exists():
+        if not destination.is_file() or _sha256_file(destination) != expected_digest:
+            raise UpdateError(
+                f"{destination.name} đã tồn tại với nội dung khác / "
+                f"{destination.name} already exists with different content."
+            )
+        destination_matches = True
+
+    candidate = destination.with_name(destination.name + ".new")
     backup = target.with_name(target.name + ".old")
     candidate.unlink(missing_ok=True)
-    shutil.copy2(staged, candidate)
     try:
-        if _sha256_file(candidate) != expected_digest:
-            raise UpdateError("SHA-256 bản copy không khớp / Replacement copy hash does not match.")
+        if not destination_matches:
+            shutil.copy2(staged, candidate)
+            if _sha256_file(candidate) != expected_digest:
+                raise UpdateError(
+                    "SHA-256 bản copy không khớp / "
+                    "Replacement copy hash does not match."
+                )
         _replace_with_retry(target, backup, UPDATE_WAIT_SECONDS)
         try:
-            _replace_with_retry(candidate, target, UPDATE_WAIT_SECONDS)
+            if not destination_matches:
+                if destination == target:
+                    _replace_with_retry(candidate, destination, UPDATE_WAIT_SECONDS)
+                else:
+                    _move_without_overwrite_with_retry(
+                        candidate,
+                        destination,
+                        expected_digest,
+                        UPDATE_WAIT_SECONDS,
+                    )
         except Exception:
             if backup.exists() and not target.exists():
                 os.replace(backup, target)
@@ -320,8 +366,8 @@ def _apply_update(target: Path, pid: int, expected_digest: str) -> None:
     environment = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     subprocess.Popen(
-        [str(target)],
-        cwd=str(target.parent),
+        [str(destination)],
+        cwd=str(destination.parent),
         env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -386,15 +432,22 @@ def _normalise_digest(value: object) -> str:
     return digest
 
 
-def _parse_checksum_manifest(data: bytes) -> str:
+def _parse_checksum_manifest(
+    data: bytes,
+    *,
+    executable_name: str = EXECUTABLE_NAME,
+) -> str:
     try:
         text = data.decode("ascii")
     except UnicodeDecodeError as exc:
         raise UpdateError("Checksum không phải ASCII / Checksum is not ASCII.") from exc
     for line in text.splitlines():
-        parts = line.strip().split()
-        if len(parts) == 2 and Path(parts[1].lstrip("*")).name == EXECUTABLE_NAME:
-            digest = parts[0].lower()
+        match = re.fullmatch(r"([0-9a-fA-F]{64}) (?: |\*)(.+)", line)
+        if (
+            match
+            and match.group(2) == executable_name
+        ):
+            digest = match.group(1).lower()
             if _SHA256_PATTERN.fullmatch(digest):
                 return digest
     raise UpdateError("Checksum manifest không hợp lệ / Invalid checksum manifest.")
@@ -414,7 +467,7 @@ def _sha256_file(path: Path) -> str:
 def _default_update_root() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     base = Path(local_app_data) if local_app_data else Path(tempfile.gettempdir())
-    return base / "RTZ-to-CSV" / "updates"
+    return base / UPDATE_CACHE_DIRECTORY_NAME / "updates"
 
 
 def _directory_can_write(directory: Path) -> bool:
@@ -465,6 +518,44 @@ def _replace_with_retry(source: Path, destination: Path, timeout_seconds: int) -
     raise UpdateError(
         f"Không thể thay file sau {timeout_seconds}s / Could not replace file after "
         f"{timeout_seconds}s: {last_error}"
+    )
+
+
+def _move_without_overwrite_with_retry(
+    source: Path,
+    destination: Path,
+    expected_digest: str,
+    timeout_seconds: int,
+) -> None:
+    """Move a migration candidate without replacing an unrelated destination."""
+
+    deadline = time.monotonic() + timeout_seconds
+    last_error: OSError | None = None
+    while time.monotonic() < deadline:
+        try:
+            if os.name == "nt":
+                os.rename(source, destination)
+            else:
+                os.link(source, destination)
+                source.unlink()
+            return
+        except FileExistsError as exc:
+            if (
+                destination.is_file()
+                and _sha256_file(destination) == expected_digest
+            ):
+                source.unlink(missing_ok=True)
+                return
+            raise UpdateError(
+                f"{destination.name} đã tồn tại với nội dung khác / "
+                f"{destination.name} already exists with different content."
+            ) from exc
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.5)
+    raise UpdateError(
+        f"Không thể tạo {destination.name} sau {timeout_seconds}s / "
+        f"Could not install {destination.name} after {timeout_seconds}s: {last_error}"
     )
 
 

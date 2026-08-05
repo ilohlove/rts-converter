@@ -6,6 +6,7 @@ import os
 import sys
 import tkinter as tk
 import threading
+import ctypes
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -32,12 +33,34 @@ from updater import (
 
 
 APP_TITLE = f"{APP_NAME} v{APP_VERSION} / RTZ to CSV/TXT"
+APP_USER_MODEL_ID = "ilohlove.RTSConverter"
+ICON_RELATIVE_PATH = Path("assets") / "rts_converter.ico"
 READY_STATUS = "Sẵn sàng / Ready"
 PROCESSING_STATUS = "Đang chuyển đổi / Converting"
 NOT_PROCESSED_STATUS = "Chưa xử lý / Not processed"
 
 
-class RtzToCsvApp:
+def resource_path(relative_path: Path) -> Path:
+    """Resolve a project asset in source and PyInstaller one-file modes."""
+
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return bundle_root / relative_path
+
+
+def configure_windows_app_identity() -> None:
+    """Give the packaged application a stable taskbar identity."""
+
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            APP_USER_MODEL_ID
+        )
+    except (AttributeError, OSError):
+        pass
+
+
+class RtsConverterApp:
     """Bilingual Windows utility for batch RTZ conversion."""
 
     def __init__(self, root: tk.Tk) -> None:
@@ -66,6 +89,10 @@ class RtzToCsvApp:
         self.root.geometry("980x680")
         self.root.minsize(820, 560)
         self.root.option_add("*tearOff", False)
+        try:
+            self.root.iconbitmap(default=str(resource_path(ICON_RELATIVE_PATH)))
+        except (OSError, tk.TclError):
+            pass
 
     def _configure_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -775,8 +802,9 @@ class RtzToCsvApp:
 
 
 def main() -> None:
+    configure_windows_app_identity()
     root = tk.Tk()
-    app = RtzToCsvApp(root)
+    app = RtsConverterApp(root)
     root.after(1200, app.start_auto_update_check)
     root.mainloop()
 

@@ -24,4 +24,4 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Compile sources
-        run: python -m py_compile app_metadata.py build_version_info.py rtz_converter.py rtz_to_csv.py updater.py
+        run: python -m py_compile app_metadata.py build_version_info.py generate_icon.py rtz_converter.py rts_converter_app.py updater.py

@@ -40,18 +40,39 @@ jobs:
       - name: Verify build artifacts
         shell: pwsh
         run: |
-          $exe = Resolve-Path .\dist\RTZ-to-CSV.exe
-          $checksum = Resolve-Path .\dist\RTZ-to-CSV.exe.sha256
+          $exe = Resolve-Path '.\dist\RTS Converter.exe'
+          $checksum = Resolve-Path '.\dist\RTS Converter.exe.sha256'
           $version = (python -c "from app_metadata import APP_VERSION; print(APP_VERSION)").Trim()
           $info = Get-Item -LiteralPath $exe
           if ($info.VersionInfo.FileVersion -notlike "$version*" -or $info.VersionInfo.ProductVersion -notlike "$version*") {
             throw "Executable version metadata is not $version"
           }
-          if ((Get-Content -Raw -LiteralPath $checksum) -notmatch '^[0-9a-fA-F]{64}\s+RTZ-to-CSV\.exe\s*$') {
+          $manifest = (Get-Content -Raw -LiteralPath $checksum).Trim()
+          if ($manifest -notmatch '^([0-9a-fA-F]{64})\s{2}RTS Converter\.exe$') {
             throw 'Checksum manifest has an invalid format.'
           }
+          $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
+          if ($Matches[1].ToLowerInvariant() -ne $actualHash) {
+            throw 'Checksum manifest does not match the executable.'
+          }
+      - name: Prepare legacy updater assets
+        shell: pwsh
+        run: |
+          $releaseAssets = Join-Path $PWD 'build\release-assets'
+          New-Item -ItemType Directory -Path $releaseAssets -Force | Out-Null
+          $newExe = Resolve-Path '.\dist\RTS Converter.exe'
+          $legacyExe = Join-Path $releaseAssets 'RTZ-to-CSV.exe'
+          Copy-Item -LiteralPath $newExe -Destination $legacyExe -Force
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $legacyExe).Hash.ToLowerInvariant()
+          "$hash  RTZ-to-CSV.exe" | Set-Content -LiteralPath "$legacyExe.sha256" -Encoding ascii
       - name: Publish immutable release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
-        run: gh release create $env:GITHUB_REF_NAME .\dist\RTZ-to-CSV.exe .\dist\RTZ-to-CSV.exe.sha256 --verify-tag --generate-notes --latest
+        run: |
+          gh release create $env:GITHUB_REF_NAME `
+            '.\dist\RTS Converter.exe' `
+            '.\dist\RTS Converter.exe.sha256' `
+            '.\build\release-assets\RTZ-to-CSV.exe' `
+            '.\build\release-assets\RTZ-to-CSV.exe.sha256' `
+            --verify-tag --generate-notes --latest

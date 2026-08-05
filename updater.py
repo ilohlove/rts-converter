@@ -281,7 +281,7 @@ def apply_update_from_argv(argv: Iterable[str] | None = None) -> bool:
         pid = int(_argument(args, "--pid"))
         expected = _normalise_digest(_argument(args, "--expected-sha256"))
         _apply_update(target, pid, expected)
-    except (UpdateError, ValueError) as exc:
+    except (UpdateError, ValueError, OSError) as exc:
         _show_native_error(str(exc))
         return True
     return True

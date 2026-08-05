@@ -1,0 +1,12 @@
+build/
+dist/
+__pycache__/
+tests/__pycache__/
+*.py[cod]
+*.spec
+*.rtz
+*.csv
+AtoBviaCVoyage.txt
+RTZ-to-CSV.exe.old
+RTZ-to-CSV.exe.new
+.pytest_cache/

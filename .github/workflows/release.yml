@@ -1,0 +1,57 @@
+name: Release Windows executable
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14.5'
+          architecture: x64
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Verify tag matches application version
+        shell: pwsh
+        run: |
+          $appVersion = (python -c "from app_metadata import APP_VERSION; print(APP_VERSION)").Trim()
+          $tagVersion = $env:GITHUB_REF_NAME.TrimStart('v')
+          if ($appVersion -ne $tagVersion) {
+            throw "Tag $env:GITHUB_REF_NAME does not match APP_VERSION $appVersion"
+          }
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Build executable
+        shell: pwsh
+        run: .\build.ps1
+      - name: Verify build artifacts
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path .\dist\RTZ-to-CSV.exe
+          $checksum = Resolve-Path .\dist\RTZ-to-CSV.exe.sha256
+          $version = (python -c "from app_metadata import APP_VERSION; print(APP_VERSION)").Trim()
+          $info = Get-Item -LiteralPath $exe
+          if ($info.VersionInfo.FileVersion -notlike "$version*" -or $info.VersionInfo.ProductVersion -notlike "$version*") {
+            throw "Executable version metadata is not $version"
+          }
+          if ((Get-Content -Raw -LiteralPath $checksum) -notmatch '^[0-9a-fA-F]{64}\s+RTZ-to-CSV\.exe\s*$') {
+            throw 'Checksum manifest has an invalid format.'
+          }
+      - name: Publish immutable release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: gh release create $env:GITHUB_REF_NAME .\dist\RTZ-to-CSV.exe .\dist\RTZ-to-CSV.exe.sha256 --verify-tag --generate-notes --latest
